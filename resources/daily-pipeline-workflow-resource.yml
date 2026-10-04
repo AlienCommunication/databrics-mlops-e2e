@@ -1,0 +1,40 @@
+# Orchestrator: the only scheduled daily job. Chaining the jobs with run_job_task makes the
+# data dependency explicit (scoring never runs on yesterday's data if ingestion is late or
+# fails) while each stage stays an independently runnable, separately owned job.
+resources:
+  jobs:
+    daily_pipeline_job:
+      name: ${bundle.target}-used-car-price-daily-pipeline
+      description: Ingest -> refresh features -> score, monitor and (if needed) retrain.
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?" # daily 05:00 UTC
+        timezone_id: UTC
+      max_concurrent_runs: 1
+      parameters:
+        - name: run_date
+          default: "{{job.start_time.iso_date}}"
+      tasks:
+        - task_key: IngestData
+          run_job_task:
+            job_id: ${resources.jobs.data_ingestion_job.id}
+            job_parameters:
+              run_date: "{{job.parameters.run_date}}"
+
+        - task_key: ComputeFeatures
+          depends_on:
+            - task_key: IngestData
+          run_job_task:
+            job_id: ${resources.jobs.feature_engineering_job.id}
+            job_parameters:
+              run_date: "{{job.parameters.run_date}}"
+
+        - task_key: ScoreAndMonitor
+          depends_on:
+            - task_key: ComputeFeatures
+          run_job_task:
+            job_id: ${resources.jobs.batch_inference_job.id}
+            job_parameters:
+              run_date: "{{job.parameters.run_date}}"
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}

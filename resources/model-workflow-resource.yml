@@ -1,0 +1,62 @@
+resources:
+  jobs:
+    model_training_job:
+      name: ${bundle.target}-used-car-price-model-training
+      description: >-
+        Train -> validate (@challenger) -> deploy (@champion). Runs weekly and on demand when
+        the Monitoring task detects performance degradation or data/prediction drift.
+      schedule:
+        quartz_cron_expression: "0 0 7 ? * SUN" # weekly, Sunday 07:00 UTC
+        timezone_id: UTC
+      max_concurrent_runs: 1
+      queue:
+        enabled: true # a drift-triggered run during a scheduled run waits instead of failing
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${resources.schemas.used_car_schema.name}
+        - name: model_name
+          default: ${var.catalog}.${resources.schemas.used_car_schema.name}.${resources.registered_models.used_car_price_model.name}
+        - name: holdout_days
+          default: "30"
+        - name: trigger_reason
+          default: scheduled
+
+
+      # Tasks run on serverless unless a target assigns a job cluster (see staging/prod in
+      # databricks.yml).
+      tasks:
+        - task_key: Train
+          notebook_task:
+            notebook_path: ../training/notebooks/Train.py
+            base_parameters:
+              experiment_name: ${resources.experiments.used_car_price_experiment.name}
+              training_lookback_days: "365"
+              learning_rate: "0.08"
+              max_iter: "400"
+              max_leaf_nodes: "31"
+
+        - task_key: ModelValidation
+          depends_on:
+            - task_key: Train
+          notebook_task:
+            notebook_path: ../validation/notebooks/ModelValidation.py
+            base_parameters:
+              run_mode: enabled
+              max_mape: "0.12"
+              max_mae: "2500"
+              min_r2: "0.90"
+
+        - task_key: ModelDeployment
+          depends_on:
+            - task_key: ModelValidation
+          notebook_task:
+            notebook_path: ../deployment/model_deployment/notebooks/ModelDeployment.py
+            base_parameters:
+              comparison_metric: mape
+              min_relative_improvement: "0.0"
+              serving_endpoint_name: ${var.serving_endpoint_name}
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}

@@ -1,0 +1,22 @@
+# Unity Catalog schema, registered model and MLflow experiment for each target.
+# In dev mode, names are automatically prefixed per developer (dev_<user>_...), so jobs
+# reference these resources instead of hard-coding names.
+resources:
+  schemas:
+    used_car_schema:
+      catalog_name: ${var.catalog}
+      name: used_car_price_${bundle.target}
+      comment: Used car price prediction — data, predictions and model (${bundle.target})
+
+  registered_models:
+    used_car_price_model:
+      name: ${var.model_base_name}
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.used_car_schema.name}
+      comment: >-
+        Predicts used car sale price (USD) from vehicle attributes. Aliases:
+        @challenger = latest validated version, @champion = version used in production.
+
+  experiments:
+    used_car_price_experiment:
+      name: /Users/${workspace.current_user.userName}/${bundle.target}-used-car-price-experiment

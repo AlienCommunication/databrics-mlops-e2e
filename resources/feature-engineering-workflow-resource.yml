@@ -1,0 +1,27 @@
+resources:
+  jobs:
+    feature_engineering_job:
+      name: ${bundle.target}-used-car-price-feature-engineering
+      description: >-
+        Refreshes the market_price_features time-series feature table (Feature Engineering in
+        Unity Catalog) and optionally publishes it to the online feature store.
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${resources.schemas.used_car_schema.name}
+        - name: run_date
+          default: "{{job.start_time.iso_date}}"
+        - name: backfill_days
+          default: "3"
+        - name: online_store_name
+          default: ${var.online_store_name}
+      tasks:
+        - task_key: ComputeMarketFeatures
+          notebook_task:
+            notebook_path: ../feature_engineering/notebooks/ComputeMarketFeatures.py
+          max_retries: 1
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
