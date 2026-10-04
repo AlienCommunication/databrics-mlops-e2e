@@ -341,37 +341,51 @@ class Workflow:
                 )
             )
         self.merge("monitoring", pd.DataFrame(rows), ["monitor_date", "model_version"])
-        # Online request logs arrive asynchronously. Zero traffic is a valid state.
+        # A newly enabled inference table can initially contain only a request-ID column.
+        # Record unavailable telemetry explicitly; do not mistake it for zero-error traffic.
+        online_result = dict(
+            monitor_date=str(self.as_of),
+            request_count=0,
+            error_count=0,
+            mean_execution_ms=0.0,
+            log_status="TABLE_NOT_YET_AVAILABLE",
+        )
         if self.spark.catalog.tableExists(self.table("online_payload")):
             from pyspark.sql import functions as F
 
-            online = self.spark.table(self.table("online_payload")).where(
-                F.col("request_date") == str(self.as_of)
-            )
+            online = self.spark.table(self.table("online_payload"))
             cols = set(online.columns)
-            duration = (
-                "execution_duration_ms" if "execution_duration_ms" in cols else "execution_time_ms"
+            date_col = next((c for c in ["request_date", "date"] if c in cols), None)
+            duration = next(
+                (c for c in ["execution_duration_ms", "execution_time_ms"] if c in cols), None
             )
-            summary = online.agg(
-                F.count("*").alias("request_count"),
-                F.sum(F.when(F.col("status_code") >= 400, 1).otherwise(0)).alias("error_count"),
-                F.avg(duration).alias("mean_execution_ms"),
-            ).first()
-            requests = int(summary["request_count"])
-            self.merge(
-                "online_monitoring",
-                pd.DataFrame(
-                    [
-                        dict(
-                            monitor_date=str(self.as_of),
-                            request_count=requests,
-                            error_count=int(summary["error_count"] or 0),
-                            mean_execution_ms=float(summary["mean_execution_ms"] or 0.0),
-                        )
-                    ]
-                ),
-                ["monitor_date"],
-            )
+            if date_col and duration and "status_code" in cols:
+                summary = (
+                    online.where(F.col(date_col) == str(self.as_of))
+                    .agg(
+                        F.count("*").alias("request_count"),
+                        F.sum(F.when(F.col("status_code") >= 400, 1).otherwise(0)).alias(
+                            "error_count"
+                        ),
+                        F.avg(duration).alias("mean_execution_ms"),
+                    )
+                    .first()
+                )
+                online_result.update(
+                    request_count=int(summary["request_count"]),
+                    error_count=int(summary["error_count"] or 0),
+                    mean_execution_ms=float(summary["mean_execution_ms"] or 0.0),
+                    log_status="OBSERVED" if summary["request_count"] else "NO_LOGGED_REQUESTS",
+                )
+            else:
+                online_result["log_status"] = "PENDING_OR_UNSUPPORTED_SCHEMA"
+        if self.spark.catalog.tableExists(self.table("online_monitoring")):
+            if "log_status" not in self.spark.table(self.table("online_monitoring")).columns:
+                self.spark.sql(
+                    f"ALTER TABLE {self.table('online_monitoring')} ADD COLUMNS (log_status STRING)"
+                )
+        self.merge("online_monitoring", pd.DataFrame([online_result]), ["monitor_date"])
+        print(json.dumps({"online_monitoring": online_result}))
         print(json.dumps(rows))
         if any(json.loads(row["alerts_json"]) for row in rows):
             raise ValueError(
