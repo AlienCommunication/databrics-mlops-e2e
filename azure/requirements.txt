@@ -5,3 +5,4 @@ mlflow==2.22.2
 databricks-sdk==0.74.0
 pytest>=8,<10
 PyYAML>=6,<7
+ruff==0.14.0
