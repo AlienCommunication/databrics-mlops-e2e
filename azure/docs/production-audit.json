@@ -1,0 +1,25 @@
+{
+  "environment": "prod",
+  "monitoring": [
+    {
+      "monitor_date": "2026-10-04",
+      "model_version": "1",
+      "prediction_count": 700,
+      "label_count": 500,
+      "metrics_json": "{\"mae\": 41238.917216900496, \"rmse\": 66023.44305893469, \"mape\": 0.06255089477412482, \"r2\": 0.9885942622918171}",
+      "drift_json": "{\"age_years\": 0.0227541722143554, \"mileage_km\": 0.013161839152483519, \"engine_cc\": 0.005630187972573433, \"owners\": 0.0004026098868588398}",
+      "alerts_json": "[]"
+    }
+  ],
+  "online_monitoring": [
+    {
+      "monitor_date": "2026-10-04",
+      "request_count": 0,
+      "error_count": 0,
+      "mean_execution_ms": 0.0,
+      "log_status": "PENDING_OR_UNSUPPORTED_SCHEMA"
+    }
+  ],
+  "logged_requests": 0,
+  "duplicate_keys": 0
+}

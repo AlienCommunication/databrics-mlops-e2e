@@ -52,16 +52,24 @@ jobs:
     env:
       DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
       BUNDLE_VAR_release: ${{ github.sha }}
-      BUNDLE_VAR_pause_status: ${{ inputs.enable_schedules && 'UNPAUSED' || 'PAUSED' }}
+      BUNDLE_VAR_pause_status: PAUSED
     defaults:
       run:
         working-directory: azure
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
       - uses: databricks/setup-cli@9230f12203ef173d0b901846f62a55ce997efef7
         with:
           version: '1.19.0'
+      - run: pip install -r requirements.txt
       - run: databricks bundle validate -t prod
       - run: databricks bundle deploy -t prod
       - run: databricks bundle run training -t prod
       - run: databricks bundle run daily_pipeline -t prod
+      - run: python scripts/predict.py --endpoint used-car-prod --profile ''
+      - name: Enable schedules only after production verification
+        if: ${{ inputs.enable_schedules }}
+        run: databricks bundle deploy -t prod --var pause_status=UNPAUSED

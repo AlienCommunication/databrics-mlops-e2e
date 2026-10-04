@@ -172,7 +172,11 @@ DESCRIBE HISTORY db_azure_workspace.used_car_prod.features;
 - **Monitoring job fails:** inspect `alerts_json` and data freshness. Monitoring does not
   automatically promote or retrain based on a noisy drift signal. Weekly retraining remains gated.
 - **Delayed online logs:** endpoint logging is asynchronous. An empty request table can mean no
-  traffic or delivery delay. Online monitoring covers operational metrics; matching real-time
+  traffic or delivery delay. A new table can initially contain only a request ID column.
+  Check `online_monitoring.log_status`: `OBSERVED` confirms traffic was measured;
+  `TABLE_NOT_YET_AVAILABLE`, `PENDING_OR_UNSUPPORTED_SCHEMA`, and `NO_LOGGED_REQUESTS`
+  do not establish a healthy zero-error service. Investigate persistent pending status and the
+  endpoint's logging configuration. Online monitoring covers operational metrics; matching real-time
   requests to eventual sale outcomes requires a business request-to-car identifier mapping.
 - **Scale:** small tables are collected to pandas deliberately (5,000 training rows). For a
   marketplace workload, replace bounded demo scoring with distributed inference, use incremental
@@ -183,8 +187,9 @@ DESCRIBE HISTORY db_azure_workspace.used_car_prod.features;
 - **Security/CI:** personal interactive identity is used for the learning deployment. Configure
   a dedicated least-privilege deployment identity before treating this as business production.
 
-For the original Azure workspace creation steps, see the separate `azure-databricks-setup`
-guide delivered with this project. For release and recovery commands, see `docs/release-runbook.md`.
+For the Azure workspace creation steps, see [workspace setup](docs/workspace-setup.md).
+For release and recovery commands, see [release runbook](docs/release-runbook.md).
+For measured results and remaining setup, see [deployment evidence](docs/deployment-evidence.md).
 
 Additional official references: [bundle jobs](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/jobs-tutorial),
 [MLOps Stacks](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/mlops-stacks),
