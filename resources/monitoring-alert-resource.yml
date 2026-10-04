@@ -1,0 +1,29 @@
+# Databricks SQL alert: notifies when the Monitoring task flags performance degradation or
+# data/prediction drift, independently of whether retraining was allowed (e.g. cooldown or
+# auto_retrain=false).
+resources:
+  alerts:
+    model_health_alert:
+      display_name: ${bundle.target}-used-car-price-model-health
+      warehouse_id: ${var.warehouse_id}
+      query_text: >-
+        SELECT count(*) AS alerts
+        FROM ${var.catalog}.${resources.schemas.used_car_schema.name}.model_performance_history
+        WHERE alert_triggered AND run_date >= current_date() - INTERVAL 1 DAY
+      evaluation:
+        comparison_operator: GREATER_THAN
+        source:
+          name: alerts
+          aggregation: MAX
+        threshold:
+          value:
+            double_value: 0
+        # Before the first monitoring run the table does not exist yet.
+        empty_result_state: OK
+        notification:
+          notify_on_ok: false
+          subscriptions:
+            - user_email: ${var.alert_email}
+      schedule:
+        quartz_cron_schedule: "0 0 8 * * ?" # daily 08:00 UTC, after the pipeline
+        timezone_id: UTC

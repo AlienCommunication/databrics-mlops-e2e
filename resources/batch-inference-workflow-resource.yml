@@ -1,0 +1,62 @@
+resources:
+  jobs:
+    batch_inference_job:
+      name: ${bundle.target}-used-car-price-batch-inference
+      description: >-
+        Score new listings with @champion, monitor performance + data/prediction drift, and
+        launch the training job when the retraining policy fires.
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${resources.schemas.used_car_schema.name}
+        - name: model_name
+          default: ${var.catalog}.${resources.schemas.used_car_schema.name}.${resources.registered_models.used_car_price_model.name}
+        - name: run_date
+          default: "{{job.start_time.iso_date}}"
+
+
+      tasks:
+        - task_key: BatchInference
+          notebook_task:
+            notebook_path: ../deployment/batch_inference/notebooks/BatchInference.py
+            base_parameters:
+              lookback_days: "1"
+          max_retries: 1
+
+        - task_key: Monitoring
+          depends_on:
+            - task_key: BatchInference
+          notebook_task:
+            notebook_path: ../monitoring/notebooks/Monitoring.py
+            base_parameters:
+              window_days: "7"
+              max_mape: "0.12"
+              min_labeled_rows: "200"
+              max_feature_psi: "0.25"
+              min_drifted_features: "1"
+              max_prediction_psi: "0.25"
+              cooldown_days: "3"
+              enable_lakehouse_monitor: "true"
+              auto_retrain: ${var.auto_retrain}
+
+        - task_key: CheckRetrain
+          depends_on:
+            - task_key: Monitoring
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.Monitoring.values.retrain}}"
+            right: "true"
+
+        - task_key: RetrainModel
+          depends_on:
+            - task_key: CheckRetrain
+              outcome: "true"
+          run_job_task:
+            job_id: ${resources.jobs.model_training_job.id}
+            job_parameters:
+              trigger_reason: "{{tasks.Monitoring.values.trigger_reason}}"
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}

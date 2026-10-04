@@ -1,0 +1,173 @@
+# Declarative Automation Bundle (Databricks Asset Bundle) for the used car price MLOps project.
+# Layout follows Databricks MLOps Stacks: code is promoted dev -> staging -> prod, and each
+# environment trains its own model on its own data ("deploy code, not models").
+bundle:
+  name: used_car_price
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: >-
+      Unity Catalog catalog. Databricks recommends one catalog per environment
+      (e.g. dev/staging/prod); this personal setup defaults to a single catalog with
+      one schema per environment. Override with --var catalog=<name>.
+    default: workspace
+  model_base_name:
+    description: Name of the Unity Catalog registered model (without catalog/schema).
+    default: used_car_price_model
+  serving_endpoint_name:
+    description: Model Serving endpoint updated on promotion. Empty disables real-time serving.
+    default: ""
+  auto_retrain:
+    description: Whether monitoring may automatically trigger the training job.
+    default: "false"
+  alert_email:
+    description: Address notified on job failures. Set explicitly when deploying as a service principal.
+    default: ${workspace.current_user.userName}
+  rows_per_day:
+    description: Synthetic listings generated per day by the ingestion job.
+    default: "200"
+  online_store_name:
+    description: >-
+      Databricks Online Feature Store to publish market features to (required for real-time
+      Model Serving of the Feature Store model). Empty disables publishing (it is billed per hour).
+    default: ""
+  warehouse_id:
+    description: SQL warehouse that evaluates the model health alert.
+    lookup:
+      warehouse: Serverless Starter Warehouse
+
+  # --- Compute placement (staging/prod only; dev and test run fully on serverless) ---------
+  training_node_type:
+    description: Training node type. Use a GPU type (e.g. g4dn.xlarge) for deep learning models.
+    default: m5d.xlarge
+  training_spark_version:
+    description: Training runtime. Use 17.3.x-gpu-ml-scala2.13 together with a GPU node type.
+    default: 17.3.x-cpu-ml-scala2.13
+  inference_node_type:
+    description: Batch inference worker node type.
+    default: m5d.large
+  inference_spark_version:
+    description: Batch inference runtime.
+    default: 17.3.x-cpu-ml-scala2.13
+  inference_max_workers:
+    description: Autoscaling upper bound for the batch inference cluster.
+    default: 4
+
+  # --- Production identity and access -------------------------------------------------------
+  prod_service_principal:
+    description: >-
+      Application ID of the service principal that prod jobs run as. Set via
+      BUNDLE_VAR_prod_service_principal in the prod CD pipeline.
+    default: ""
+  data_scientists_group:
+    description: Group granted read access to prod data and EXECUTE on the prod model.
+    default: account users
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-cb66a263-12ba.cloud.databricks.com
+
+  # Ephemeral target for CI integration tests on pull requests.
+  test:
+    mode: production
+    workspace:
+      host: https://dbc-cb66a263-12ba.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    presets:
+      trigger_pause_status: PAUSED
+    variables:
+      rows_per_day: "100"
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+
+  staging:
+    mode: production
+    workspace:
+      host: https://dbc-cb66a263-12ba.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    presets:
+      # Staging is exercised on demand after merges to main, not on a schedule.
+      trigger_pause_status: PAUSED
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    # Compute placement (the Databricks equivalent of Kubeflow node selectors / node pools):
+    # heavy tasks get dedicated classic job clusters (EC2 in the workspace's AWS account);
+    # every other task stays on serverless. Swap training to a GPU node pool with
+    #   --var training_node_type=g4dn.xlarge --var training_spark_version=17.3.x-gpu-ml-scala2.13
+    resources: &classic_compute
+      jobs:
+        model_training_job:
+          job_clusters:
+            - job_cluster_key: training_cluster
+              new_cluster:
+                spark_version: ${var.training_spark_version}
+                node_type_id: ${var.training_node_type}
+                num_workers: 0
+                data_security_mode: SINGLE_USER
+                spark_conf:
+                  spark.databricks.cluster.profile: singleNode
+                  spark.master: "local[*, 4]"
+                custom_tags:
+                  ResourceClass: SingleNode
+                  workload: training
+                aws_attributes:
+                  availability: SPOT_WITH_FALLBACK
+                  first_on_demand: 1
+          tasks:
+            - task_key: Train
+              job_cluster_key: training_cluster
+        batch_inference_job:
+          job_clusters:
+            - job_cluster_key: batch_inference_cluster
+              new_cluster:
+                spark_version: ${var.inference_spark_version}
+                node_type_id: ${var.inference_node_type}
+                autoscale:
+                  min_workers: 1
+                  max_workers: ${var.inference_max_workers}
+                data_security_mode: SINGLE_USER
+                custom_tags:
+                  workload: batch-inference
+                aws_attributes:
+                  availability: SPOT_WITH_FALLBACK
+                  first_on_demand: 1
+          tasks:
+            - task_key: BatchInference
+              job_cluster_key: batch_inference_cluster
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-cb66a263-12ba.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      auto_retrain: "true"
+      inference_max_workers: 8
+    # Production jobs never run as a human user.
+    run_as:
+      service_principal_name: ${var.prod_service_principal}
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+      - group_name: ${var.data_scientists_group}
+        level: CAN_VIEW
+    resources:
+      <<: *classic_compute
+      schemas:
+        used_car_schema:
+          grants:
+            - principal: ${var.data_scientists_group}
+              privileges: [USE_SCHEMA, SELECT]
+      registered_models:
+        used_car_price_model:
+          grants:
+            - principal: ${var.data_scientists_group}
+              privileges: [EXECUTE]

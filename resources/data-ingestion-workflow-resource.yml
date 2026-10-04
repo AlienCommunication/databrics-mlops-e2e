@@ -1,0 +1,40 @@
+resources:
+  jobs:
+    data_ingestion_job:
+      name: ${bundle.target}-used-car-price-data-ingestion
+      description: >-
+        Idempotent ingestion of used car listings into raw_listings. Triggered by
+        daily_pipeline_job (no own schedule) so downstream jobs never read stale data.
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${resources.schemas.used_car_schema.name}
+        - name: run_date
+          default: "{{job.start_time.iso_date}}"
+        - name: backfill_days
+          default: "1"
+        - name: initial_backfill_days
+          default: "365"
+        - name: rows_per_day
+          default: ${var.rows_per_day}
+        # Simulation knobs for exercising the drift/retrain loop:
+        #   market_drift    -> concept drift (prices move, inputs do not)
+        #   fleet_age_shift -> data drift (older, higher-mileage vehicles)
+        - name: market_drift
+          default: "0.0"
+        - name: fleet_age_shift
+          default: "0.0"
+        - name: source_path
+          default: ""
+      tasks:
+        - task_key: IngestData
+          # Light pandas/Delta work: serverless.
+          notebook_task:
+            notebook_path: ../data_ingestion/notebooks/IngestData.py
+          max_retries: 2
+          min_retry_interval_millis: 300000
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
