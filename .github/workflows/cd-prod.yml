@@ -1,0 +1,28 @@
+# Deploy to production when main is merged into the `release` branch.
+# Configure required reviewers on the `prod` GitHub environment so a human approves each release.
+name: CD - prod
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+concurrency:
+  group: used-car-price-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      BUNDLE_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+      # Application ID of the prod service principal (jobs run_as); required by the prod target.
+      BUNDLE_VAR_prod_service_principal: ${{ vars.PROD_SERVICE_PRINCIPAL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle validate -t prod
+      - run: databricks bundle deploy -t prod

@@ -1,0 +1,50 @@
+# Pull request checks: lint, type-check and unit tests, then an end-to-end integration test that
+# deploys the bundle to the isolated `test` target and runs every job against real Databricks.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: used-car-price-test-target
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy
+      - run: pytest --cov=used_car_price --cov-report=term-missing
+
+  integration-test:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    environment: test
+    env:
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      BUNDLE_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle validate -t test
+      - run: databricks bundle deploy -t test
+      - name: Ingest data
+        run: databricks bundle run -t test data_ingestion_job --params initial_backfill_days=120
+      - name: Compute market features (feature store)
+        run: databricks bundle run -t test feature_engineering_job
+      - name: Train, validate and deploy model
+        run: databricks bundle run -t test model_training_job
+      - name: Batch inference, monitoring and drift check
+        run: databricks bundle run -t test batch_inference_job
+      - name: Orchestrated daily pipeline (ingest -> features -> score/monitor)
+        run: databricks bundle run -t test daily_pipeline_job
