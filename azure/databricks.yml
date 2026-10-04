@@ -1,0 +1,27 @@
+bundle:
+  name: used-car-mlops
+include:
+  - resources/*.yml
+variables:
+  catalog:
+    default: db_azure_workspace
+  schema:
+    default: used_car_dev
+  release:
+    default: initial-demo
+  pause_status:
+    default: PAUSED
+workspace:
+  host: https://adb-7405610390336981.1.azuredatabricks.net
+  root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+targets:
+  dev:
+    default: true
+    variables:
+      schema: used_car_dev
+  staging:
+    variables:
+      schema: used_car_staging
+  prod:
+    variables:
+      schema: used_car_prod
