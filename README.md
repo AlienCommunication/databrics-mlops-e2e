@@ -13,6 +13,13 @@ The tooling matches the default MLOps Stack: Unity Catalog, Feature Engineering,
 Declarative Automation Bundles (Asset Bundles), Model Serving, Lakehouse Monitoring, SQL alerts
 and GitHub Actions.
 
+## Azure serverless implementation
+
+The Azure Databricks implementation and teaching walkthrough are in [azure/README.md](azure/README.md).
+It targets `db-azure-workspace`, supports real-time and scheduled batch predictions, and uses
+separate dev/staging/prod schemas. Azure CI/release workflows are named `Azure MLOps`.
+The original project below targets AWS.
+
 ## Architecture
 
 ```mermaid

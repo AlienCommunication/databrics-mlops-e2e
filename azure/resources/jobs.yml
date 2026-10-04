@@ -1,0 +1,164 @@
+resources:
+  jobs:
+    training:
+      name: used-car-${bundle.target}-training
+      max_concurrent_runs: 1
+      tags:
+        project: used-car-mlops
+        environment: ${bundle.target}
+      parameters:
+      - name: as_of
+        default: ''
+      tasks:
+      - task_key: prepare
+        depends_on: []
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: prepare
+      - task_key: train
+        depends_on:
+        - task_key: prepare
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: train
+      - task_key: validate
+        depends_on:
+        - task_key: train
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: validate
+      - task_key: deploy
+        depends_on:
+        - task_key: validate
+        timeout_seconds: 3600
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: deploy
+      schedule:
+        quartz_cron_expression: 0 0 7 ? * SUN
+        timezone_id: Asia/Kolkata
+        pause_status: ${var.pause_status}
+    batch_inference:
+      name: used-car-${bundle.target}-batch
+      max_concurrent_runs: 1
+      tags:
+        project: used-car-mlops
+        environment: ${bundle.target}
+      parameters:
+      - name: as_of
+        default: ''
+      tasks:
+      - task_key: inputs
+        depends_on: []
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: inputs
+      - task_key: batch
+        depends_on:
+        - task_key: inputs
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: batch
+    monitoring:
+      name: used-car-${bundle.target}-monitoring
+      max_concurrent_runs: 1
+      tags:
+        project: used-car-mlops
+        environment: ${bundle.target}
+      parameters:
+      - name: as_of
+        default: ''
+      tasks:
+      - task_key: monitor
+        depends_on: []
+        timeout_seconds: 1800
+        max_retries: 0
+        notebook_task:
+          notebook_path: ../src/task.py
+          base_parameters:
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            endpoint: used-car-${bundle.target}
+            experiment: /Shared/used-car-mlops/${bundle.target}
+            release: ${var.release}
+            as_of: '{{job.parameters.as_of}}'
+            task: monitor
+    daily_pipeline:
+      name: used-car-${bundle.target}-daily
+      max_concurrent_runs: 1
+      tags:
+        project: used-car-mlops
+        environment: ${bundle.target}
+      parameters:
+      - name: as_of
+        default: ''
+      tasks:
+      - task_key: score
+        run_job_task:
+          job_id: ${resources.jobs.batch_inference.id}
+          job_parameters:
+            as_of: '{{job.parameters.as_of}}'
+      - task_key: monitor
+        depends_on:
+        - task_key: score
+        run_job_task:
+          job_id: ${resources.jobs.monitoring.id}
+          job_parameters:
+            as_of: '{{job.parameters.as_of}}'
+      schedule:
+        quartz_cron_expression: 0 0 8 * * ?
+        timezone_id: Asia/Kolkata
+        pause_status: ${var.pause_status}
